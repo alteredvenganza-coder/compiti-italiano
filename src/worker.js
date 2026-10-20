@@ -141,6 +141,16 @@ async function api(req, env, url) {
     if (!u.active) return fail(403, "Accesso sospeso: chiedi a chi ti segue");
     return json({ ok: true, role: "student" }, 200, { "set-cookie": await startSession(env, u.id) });
   }
+  if (path === "/api/voice-status" && method === "GET") {
+    const out = { key: !!env.ELEVENLABS_API_KEY, voice: env.ELEVENLABS_VOICE_ID || null, model: env.ELEVENLABS_MODEL || null };
+    if (out.key) {
+      const r = await fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(await pickVoice(env))}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+      out.voiceCheck = r.status;
+      if (!r.ok) { try { const j = await r.json(); out.detail = (j.detail && (j.detail.status || j.detail.message)) || null; } catch {} }
+      else { try { const j = await r.json(); out.voiceName = j.name; } catch {} }
+    }
+    return json(out);
+  }
   if (path === "/api/logout" && method === "POST") {
     const token = cookie(req, "sid");
     if (token) await DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
