@@ -177,6 +177,32 @@ function renderItem(box, it) {
   if (it.t === "listen") setTimeout(() => say(it.a, 0.85), 300);
 }
 
+// Feedback sounds, synthesized live (no files): a rising marimba-like arpeggio for right, a soft low "bwomp" for wrong.
+let actx = null;
+const soundOn = () => ls.get("sounds", true);
+function tone(ctx, { f0, f1 = f0, type = "triangle", at = 0, dur = 0.18, vol = 0.25, cutoff = 0 }) {
+  const t = ctx.currentTime + at, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let node = o; if (cutoff) { const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = cutoff; o.connect(lp); node = lp; }
+  node.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+function sfx(kind) {
+  if (!soundOn()) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+    if (kind === "ok") {
+      [[1046.5, 0], [1318.5, 0.07], [1568, 0.14]].forEach(([f, at]) => { tone(actx, { f0: f, at, dur: 0.32, vol: 0.22 }); tone(actx, { f0: f * 2, at, dur: 0.12, vol: 0.05, type: "sine" }); });
+    } else if (kind === "ko") {
+      tone(actx, { f0: 196, f1: 165, type: "sawtooth", at: 0, dur: 0.16, vol: 0.18, cutoff: 900 });
+      tone(actx, { f0: 156, f1: 110, type: "sawtooth", at: 0.15, dur: 0.28, vol: 0.18, cutoff: 700 });
+    } else if (kind === "win") {
+      [[784, 0], [988, 0.09], [1175, 0.18], [1568, 0.3]].forEach(([f, at]) => tone(actx, { f0: f, at, dur: 0.4, vol: 0.2 }));
+    }
+  } catch {}
+}
+
 // Voice: ElevenLabs through our server (cached), with the phone's own voice as fallback.
 let audioEl = null;
 const voiceOk = { v: true };
@@ -219,6 +245,8 @@ function answer(given, opts = {}) {
     expected: expectedText(it), correct: res.ok, needs_review: it.t === "tr" && !res.ok && !opts.skip,
   };
   persistPlay();
+  sfx(res.ok ? "ok" : "ko");
+  if (navigator.vibrate && !res.ok) navigator.vibrate(60);
   const sheet = $("#sheet");
   const nextLbl = p.i < p.ids.length - 1 ? "Avanti" : "Finisci";
   const x = it.x && !it.two ? `<p style="margin:0">${esc(it.x)}</p>` : "";
@@ -266,6 +294,7 @@ async function finishPlay() {
 
 function renderDone(root) {
   const d = S.done; if (!d) return go("#/");
+  if (!d.played) { d.played = true; if (d.kind === "compito" || d.passed) sfx("win"); }
   const wrong = d.results.filter((r) => !r.correct).slice(0, 4);
   if (d.kind === "compito") {
     root.innerHTML = `<div class="phone"><div class="full-blue">${I.star}
@@ -365,6 +394,7 @@ function viewMe(root) {
   root.innerHTML = `<div class="phone"><main>
     <div><div class="hand blue">sono</div><h1 class="display d-l blue" style="font-size:54px">${esc(S.me.name)}</h1></div>
     <div class="kpis"><div class="kpi solid"><span class="small">Punti</span><b>${s.xp || 0} XP</b></div><div class="kpi"><span class="small muted">Giorni di fila</span><b>${s.streak || 0}</b></div></div>
+    <label class="card thin check" style="justify-content:space-between"><b>Suoni giusto / sbagliato</b><input type="checkbox" id="snd" ${soundOn() ? "checked" : ""}></label>
     <div class="card dashed stack"><b>Avere l'app sul telefono</b><span class="small">iPhone: Condividi › Aggiungi a schermata Home. Android: menu ⋮ › Installa app o Aggiungi a schermata Home.</span></div>
     <button class="btn ghost block" data-act="logout" style="margin-top:auto">Esci</button>
   </main>${tabbar("me")}</div>`;
@@ -745,8 +775,8 @@ document.addEventListener("click", async (ev) => {
         const M = p.match, it = EX[p.ids[p.i]];
         if (!M.sel) { toast("Prima scegli una parola italiana"); break; }
         const pair = it.pairs.find((x) => x[0] === M.sel);
-        if (pair[1] === t.dataset.w) { M.done.push(M.sel); M.sel = null; renderItem($("#ex"), it); if (M.done.length === it.pairs.length) answer("", { mistakes: M.mistakes.length, wrongs: M.mistakes }); }
-        else { M.mistakes.push(`${M.sel}≠${t.dataset.w}`); t.classList.add("ko"); const n = $("#mnote"); if (n) n.textContent = `no! ${M.sel} = ${pair[1]}`; setTimeout(() => t.classList.remove("ko"), 700); }
+        if (pair[1] === t.dataset.w) { if (M.done.length + 1 < it.pairs.length) sfx("ok"); M.done.push(M.sel); M.sel = null; renderItem($("#ex"), it); if (M.done.length === it.pairs.length) answer("", { mistakes: M.mistakes.length, wrongs: M.mistakes }); }
+        else { sfx("ko"); M.mistakes.push(`${M.sel}≠${t.dataset.w}`); t.classList.add("ko"); const n = $("#mnote"); if (n) n.textContent = `no! ${M.sel} = ${pair[1]}`; setTimeout(() => t.classList.remove("ko"), 700); }
         break;
       }
       case "next": p.phase = "answer"; p.i += 1; p.match = null; persistPlay(); if (p.i >= p.ids.length) finishPlay(); else renderPlay($("#app")); window.scrollTo(0, 0); break;
@@ -793,6 +823,7 @@ document.addEventListener("click", async (ev) => {
   } catch (e) { toast(e.message); }
 });
 
+document.addEventListener("change", (e) => { if (e.target.id === "snd") { ls.set("sounds", e.target.checked); if (e.target.checked) sfx("ok"); } });
 window.addEventListener("hashchange", render);
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 if (window.speechSynthesis) window.speechSynthesis.getVoices();
