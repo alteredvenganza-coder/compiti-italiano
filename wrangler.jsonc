@@ -17,5 +17,9 @@
       "migrations_dir": "migrations"
     }
   ],
+  "vars": {
+    "ELEVENLABS_VOICE_ID": "MuTiG4dbrEGYEy3XP4iP",
+    "ELEVENLABS_MODEL": "eleven_multilingual_v2"
+  },
   "observability": { "enabled": true }
 }
