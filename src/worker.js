@@ -31,6 +31,7 @@ function cookie(req, name) {
 }
 async function body(req) { try { return await req.json(); } catch { return {}; } }
 const cleanUser = (s) => String(s || "").trim().toLowerCase();
+const newKey = () => b64(crypto.getRandomValues(new Uint8Array(18))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const validUsername = (s) => /^[a-z0-9._-]{3,24}$/.test(s);
 
 /* ---------------- auth ---------------- */
@@ -118,6 +119,14 @@ async function api(req, env, url) {
     if (!u.active) return fail(403, "Accesso sospeso: chiedi a chi ti segue");
     return json({ ok: true, role: u.role }, 200, { "set-cookie": await startSession(env, u.id) });
   }
+  if (path === "/api/login-key" && method === "POST") {
+    const b = await body(req);
+    const key = String(b.key || "");
+    const u = key.length >= 20 ? await DB.prepare("SELECT id, active FROM users WHERE login_key = ? AND role = 'student'").bind(key).first() : null;
+    if (!u) return fail(401, "Questo QR non funziona più: chiedi a Nad quello nuovo");
+    if (!u.active) return fail(403, "Accesso sospeso: chiedi a chi ti segue");
+    return json({ ok: true, role: "student" }, 200, { "set-cookie": await startSession(env, u.id) });
+  }
   if (path === "/api/logout" && method === "POST") {
     const token = cookie(req, "sid");
     if (token) await DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
@@ -194,8 +203,10 @@ async function api(req, env, url) {
   if (me.role !== "teacher") return fail(403, "Solo per l'insegnante");
 
   if (path === "/api/t/students" && method === "GET") {
+    const missing = await DB.prepare("SELECT id FROM users WHERE role = 'student' AND login_key IS NULL").all();
+    if (missing.results.length) await DB.batch(missing.results.map((m) => DB.prepare("UPDATE users SET login_key = ? WHERE id = ?").bind(newKey(), m.id)));
     const r = await DB.prepare(
-      `SELECT u.id, u.name, u.username, u.color, u.active, u.last_login, u.created_at,
+      `SELECT u.id, u.name, u.username, u.color, u.active, u.last_login, u.created_at, u.login_key,
         (SELECT COUNT(*) FROM assignments a WHERE a.student_id = u.id) AS assigned,
         (SELECT COUNT(*) FROM assignments a WHERE a.student_id = u.id AND a.status = 'fatto') AS done,
         (SELECT ROUND(100.0 * SUM(correct) / COUNT(*)) FROM answers x WHERE x.user_id = u.id) AS accuracy,
@@ -217,9 +228,18 @@ async function api(req, env, url) {
     const { hash, salt } = await hashSecret(pin);
     const colors = ["#1235a8", "#e39a3b", "#2b7a4b", "#8a3fb0"];
     const n = await DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'student'").first();
-    await DB.prepare("INSERT INTO users (id, role, name, username, pass_hash, pass_salt, color) VALUES (?, 'student', ?, ?, ?, ?, ?)")
-      .bind(uid(), name, username, hash, salt, colors[n.n % colors.length]).run();
-    return json({ ok: true });
+    const newId = uid();
+    await DB.prepare("INSERT INTO users (id, role, name, username, pass_hash, pass_salt, color, login_key) VALUES (?, 'student', ?, ?, ?, ?, ?, ?)")
+      .bind(newId, name, username, hash, salt, colors[n.n % colors.length], newKey()).run();
+    return json({ ok: true, id: newId });
+  }
+  m = path.match(/^\/api\/t\/students\/([\w-]+)\/key$/);
+  if (m && method === "POST") {
+    const st = await DB.prepare("SELECT id FROM users WHERE id = ? AND role = 'student'").bind(m[1]).first();
+    if (!st) return fail(404, "Alunna non trovata");
+    const key = newKey();
+    await DB.prepare("UPDATE users SET login_key = ? WHERE id = ?").bind(key, st.id).run();
+    return json({ ok: true, login_key: key });
   }
   m = path.match(/^\/api\/t\/students\/([\w-]+)\/(pin|active)$/);
   if (m && method === "POST") {

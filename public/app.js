@@ -369,11 +369,13 @@ function viewLogin(root, setup) {
       <button class="btn block big" type="submit">${setup ? "Crea account" : "Entra"}</button>
       <p class="small muted" id="f-err" role="alert" style="margin:0;color:var(--red);font-weight:700"></p>
     </form></div>`;
+  const preU = new URLSearchParams(location.search).get("u");
+  if (preU && !setup) { $("#f-user").value = preU; setTimeout(() => $("#f-pass").focus(), 50); }
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = { username: $("#f-user").value, password: $("#f-pass").value };
     if (setup) body.name = $("#f-name").value;
-    try { await api(setup ? "/api/setup" : "/api/login", { method: "POST", body }); await loadMe(); go("#/"); }
+    try { await api(setup ? "/api/setup" : "/api/login", { method: "POST", body }); await loadMe(); if (location.search) history.replaceState(null, "", "/" + "#/"); go("#/"); }
     catch (err) { $("#f-err").textContent = err.message; }
   });
 }
@@ -462,7 +464,7 @@ async function viewTAlunne(root) {
           ${[["Nome utente", s.username], ["Ultimo accesso", s.last_login ? fmtDate(s.last_login) : "mai"], ["Compiti fatti", `${s.done} di ${s.assigned}`], ["Giuste", s.accuracy != null ? s.accuracy + "%" : "–"], ["Palestra", fmtMin(s.practice_sec)], ["Giorni di fila", s.streak || 0]]
             .map(([l, v]) => `<div style="padding:9px 12px;border:1.5px solid ${k === 0 ? "var(--cobalt-soft)" : "var(--line)"};border-radius:14px"><div class="small" style="opacity:.8">${l}</div><b>${esc(v)}</b></div>`).join("")}</div>
         ${shown[s.id] ? `<div class="stack" style="gap:2px"><span class="small">Nuovo PIN, scrivilo e daglielo:</span><span class="pinshow">${shown[s.id]}</span></div>` : ""}
-        <div class="row wrap" style="gap:8px"><button class="btn ${k === 0 ? "light" : ""} sm" data-act="new-pin" data-id="${s.id}">Nuovo PIN</button>
+        <div class="row wrap" style="gap:8px"><button class="btn ${k === 0 ? "light" : ""} sm" data-act="card" data-id="${s.id}">Scheda con QR</button><button class="btn ${k === 0 ? "outline-light" : "ghost"} sm" data-act="new-pin" data-id="${s.id}">Nuovo PIN</button>
           <button class="btn ${k === 0 ? "outline-light" : "ghost"} sm" data-act="toggle-active" data-id="${s.id}" data-on="${s.active ? 0 : 1}">${s.active ? "Sospendi" : "Riattiva"}</button></div></div>`).join("")}
       ${st.length ? "" : '<div class="empty"><span class="hand">ancora nessuna alunna</span>Crea il primo account con il modulo.</div>'}
     </div></div>
@@ -476,9 +478,38 @@ async function viewTAlunne(root) {
   $("#s-user").addEventListener("input", (e) => (e.target.dataset.touched = "1"));
   $("#stForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    try { await api("/api/t/students", { method: "POST", body: { name: $("#s-name").value, username: $("#s-user").value, pin: $("#s-pin").value } }); toast(`Account creato: ${$("#s-user").value} · PIN ${$("#s-pin").value}`); render(); }
+    try {
+      const pin = $("#s-pin").value;
+      const r = await api("/api/t/students", { method: "POST", body: { name: $("#s-name").value, username: $("#s-user").value, pin } });
+      S.cache.shownPin = { ...(S.cache.shownPin || {}), [r.id]: pin };
+      toast("Account creato"); await render(); showCard(r.id);
+    }
     catch (err) { toast(err.message); }
   });
+}
+
+function loadQR() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = "/qrcode.js"; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
+}
+async function showCard(id) {
+  const s = (S.cache.students || []).find((x) => x.id === id); if (!s) return;
+  const link = `${location.origin}/?k=${encodeURIComponent(s.login_key || "")}`;
+  let svg = "";
+  try { await loadQR(); const q = qrcode(0, "M"); q.addData(link); q.make(); svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }).replace(/fill="#000000"/g, 'fill="#1235a8"').replace(/fill="#ffffff"/g, 'fill="#fffdf7"'); }
+  catch { svg = '<p class="muted">Non riesco a creare il QR: usa il link qui sotto.</p>'; }
+  const pin = (S.cache.shownPin || {})[id];
+  $("#cardModal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", `<div id="cardModal" style="position:fixed;inset:0;background:rgba(13,27,76,.55);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px" data-act="close-card">
+    <div class="card stack" style="max-width:380px;width:100%;text-align:center;cursor:default" onclick="event.stopPropagation()">
+      <span class="eyebrow blue">Scheda di accesso</span><h2 class="display d-m blue">${esc(s.name)}</h2>
+      <div style="width:220px;margin:0 auto">${svg}</div>
+      <p style="margin:0"><b>Inquadra con la fotocamera ed entri subito.</b> Se un giorno esci, basta inquadrarlo di nuovo.</p>
+      <div class="kpis" style="grid-template-columns:1fr 1fr"><div class="kpi" style="border-color:var(--line)"><span class="small muted">Nome utente</span><b style="font-size:24px">${esc(s.username)}</b></div>
+        <div class="kpi" style="border-color:var(--line)"><span class="small muted">PIN</span><b style="font-size:24px">${pin ? esc(pin) : "quello dato"}</b></div></div>
+      <p class="small muted" style="margin:0">Il PIN serve solo se entra a mano.${pin ? "" : " Non si può rivedere: se l'ha perso, premi «Nuovo PIN»."} Se il QR finisce in mani sbagliate, premi «Nuovo QR»: quello vecchio smette di funzionare.</p>
+      <div class="row wrap" style="gap:8px"><button class="btn ghost sm grow" data-act="copy-link" data-link="${esc(link)}">Copia link</button><button class="btn red sm grow" data-act="new-key" data-id="${s.id}">Nuovo QR</button><button class="btn sm grow" data-act="close-card">Chiudi</button></div>
+    </div></div>`);
 }
 
 /* ---- dove sbagliano ---- */
@@ -642,6 +673,11 @@ async function render() {
   const root = $("#app");
   const h = location.hash || "#/";
   try {
+    const key = new URLSearchParams(location.search).get("k");
+    if (key) {
+      history.replaceState(null, "", "/#/");
+      try { await api("/api/login-key", { method: "POST", body: { key } }); S.me = null; } catch (e) { toast(e.message); }
+    }
     if (!S.me) {
       const st = await api("/api/setup-status").catch(() => ({ needsSetup: false }));
       await loadMe();
@@ -714,8 +750,15 @@ document.addEventListener("click", async (ev) => {
       case "new-pin": {
         const pin = String(Math.floor(100000 + Math.random() * 900000));
         await api(`/api/t/students/${id}/pin`, { method: "POST", body: { pin } });
-        S.cache.shownPin = { ...(S.cache.shownPin || {}), [id]: pin }; render(); break;
+        S.cache.shownPin = { ...(S.cache.shownPin || {}), [id]: pin }; await render(); showCard(id); break;
       }
+      case "card": showCard(id); break;
+      case "new-key":
+        if (!t.dataset.confirm) { t.dataset.confirm = "1"; t.textContent = "Sicuro? Il vecchio non va più"; break; }
+        { const r = await api(`/api/t/students/${id}/key`, { method: "POST" }); const st = (S.cache.students || []).find((x) => x.id === id); if (st) st.login_key = r.login_key; showCard(id); toast("Nuovo QR creato"); }
+        break;
+      case "close-card": $("#cardModal")?.remove(); break;
+      case "copy-link": navigator.clipboard?.writeText(t.dataset.link).then(() => toast("Link copiato"), () => toast(t.dataset.link)); break;
       case "toggle-active": await api(`/api/t/students/${id}/active`, { method: "POST", body: { active: t.dataset.on === "1" } }); render(); break;
       case "an-who": S.cache.anWho = id || ""; render(); break;
       case "err-solve": await api(`/api/t/errors/${id}`, { method: "PATCH", body: { solved: t.dataset.v === "1" } }); render(); break;
