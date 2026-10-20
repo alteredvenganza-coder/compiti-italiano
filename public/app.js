@@ -582,6 +582,7 @@ async function showCard(id) {
       <div class="kpis" style="grid-template-columns:1fr 1fr"><div class="kpi" style="border-color:var(--line)"><span class="small muted">Nome utente</span><b style="font-size:24px">${esc(s.username)}</b></div>
         <div class="kpi" style="border-color:var(--line)"><span class="small muted">PIN</span><b style="font-size:24px">${pin ? esc(pin) : "quello dato"}</b></div></div>
       <p class="small muted" style="margin:0">Il PIN serve solo se entra a mano.${pin ? "" : " Non si può rivedere: se l'ha perso, premi «Nuovo PIN»."} Se il QR finisce in mani sbagliate, premi «Nuovo QR»: quello vecchio smette di funzionare.</p>
+      <button class="btn green block" data-act="share-link" data-link="${esc(link)}" data-name="${esc(s.name)}">Invia l'invito (WhatsApp, messaggi…)</button>
       <div class="row wrap" style="gap:8px"><button class="btn ghost sm grow" data-act="copy-link" data-link="${esc(link)}">Copia link</button><button class="btn red sm grow" data-act="new-key" data-id="${s.id}">Nuovo QR</button><button class="btn sm grow" data-act="close-card">Chiudi</button></div>
     </div></div>`);
 }
@@ -833,6 +834,12 @@ document.addEventListener("click", async (ev) => {
         { const r = await api(`/api/t/students/${id}/key`, { method: "POST" }); const st = (S.cache.students || []).find((x) => x.id === id); if (st) st.login_key = r.login_key; showCard(id); toast("Nuovo QR creato"); }
         break;
       case "close-card": $("#cardModal")?.remove(); break;
+      case "share-link": {
+        const text = `Ciao ${t.dataset.name}! Questo è il tuo accesso a Compiti di Italiano. Apri il link dal telefono ed entri subito, poi scegli "Aggiungi a schermata Home".`;
+        if (navigator.share) { try { await navigator.share({ title: "Compiti di Italiano", text, url: t.dataset.link }); } catch {} }
+        else window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + t.dataset.link)}`, "_blank", "noopener");
+        break;
+      }
       case "copy-link": navigator.clipboard?.writeText(t.dataset.link).then(() => toast("Link copiato"), () => toast(t.dataset.link)); break;
       case "toggle-active": await api(`/api/t/students/${id}/active`, { method: "POST", body: { active: t.dataset.on === "1" } }); render(); break;
       case "an-who": S.cache.anWho = id || ""; render(); break;
