@@ -144,10 +144,13 @@ async function api(req, env, url) {
   if (path === "/api/voice-status" && method === "GET") {
     const out = { key: !!env.ELEVENLABS_API_KEY, voice: env.ELEVENLABS_VOICE_ID || null, model: env.ELEVENLABS_MODEL || null };
     if (out.key) {
-      const r = await fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(await pickVoice(env))}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
-      out.voiceCheck = r.status;
+      const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(await pickVoice(env))}?output_format=mp3_22050_32`, {
+        method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY, "content-type": "application/json", accept: "audio/mpeg" },
+        body: JSON.stringify({ text: "ciao", model_id: env.ELEVENLABS_MODEL || "eleven_multilingual_v2" }),
+      });
+      out.ttsCheck = r.status;
       if (!r.ok) { try { const j = await r.json(); out.detail = (j.detail && (j.detail.status || j.detail.message)) || null; } catch {} }
-      else { try { const j = await r.json(); out.voiceName = j.name; } catch {} }
+      else out.bytes = (await r.arrayBuffer()).byteLength;
     }
     return json(out);
   }
