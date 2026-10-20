@@ -34,6 +34,9 @@ const I = {
   flame: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d2412f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22c4 0 7-3 7-7 0-4-3-6-4-10-2 2-3 4-3 6-1-1-2-2-2-4-3 2-5 5-5 8 0 4 3 7 7 7z"/></svg>',
   tabTasks: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h12l4 4v12H4z"/><path d="M8 12h8M8 16h5"/></svg>',
   tabGym: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 8v8M18 8v8M3 10v4M21 10v4M6 12h12"/></svg>',
+  tabMic: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
+  mic: '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#f6f1e4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
+  stop: '<svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="#f6f1e4"/></svg>',
   tabMe: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>',
   notebook: '<svg width="150" height="118" viewBox="0 0 150 118" fill="none" stroke="#f6f1e4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 30 L70 22 L72 96 L16 104 Z"/><path d="M70 22 L126 30 L124 104 L72 96"/><path d="M26 44 L58 40 M26 58 L58 54 M26 72 L50 69 M84 40 L114 44 M84 54 L114 58"/><path d="M98 70 L136 32 L144 40 L106 78 L94 82 Z"/></svg>',
   clock: '<svg class="clock" width="120" height="120" viewBox="0 0 120 120" fill="none" stroke="#3a5ccc" stroke-width="3" stroke-linecap="round" aria-hidden="true"><circle cx="60" cy="60" r="44"/><path d="M60 30v30l20 12"/></svg>',
@@ -213,20 +216,23 @@ function sfx(kind) {
 
 // Voice: ElevenLabs through our server (cached), with the phone's own voice as fallback.
 let audioEl = null;
-const voiceOk = { v: true };
+let sayToken = 0;
 async function say(text, rate) {
-  const slow = rate < 0.7;
-  if (voiceOk.v) {
-    try {
-      if (audioEl) audioEl.pause();
-      audioEl = new Audio(`/api/tts?t=${encodeURIComponent(text)}${slow ? "&slow=1" : ""}`);
-      await audioEl.play();
-      return;
-    } catch (e) { if (String(e && e.name) !== "NotAllowedError") voiceOk.v = false; else return toast("Tocca il tasto per ascoltare"); }
+  const slow = rate < 0.7, my = ++sayToken;
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+  if (audioEl) { try { audioEl.pause(); } catch {} }
+  const a = new Audio(`/api/tts?t=${encodeURIComponent(text)}${slow ? "&slow=1" : ""}`);
+  audioEl = a;
+  try { await a.play(); return; }
+  catch (e) {
+    if (my !== sayToken) return;                       // a newer tap replaced this one: not an error
+    const name = String(e && e.name);
+    if (name === "AbortError") return;
+    if (name === "NotAllowedError") return toast("Tocca il tasto per ascoltare");
   }
+  // Only this word failed (network, credits): use the phone's voice for it, keep trying ElevenLabs next time.
   try {
     const synth = window.speechSynthesis; if (!synth) return toast("Questo telefono non legge ad alta voce");
-    synth.cancel();
     const u = new SpeechSynthesisUtterance(text); u.lang = "it-IT"; u.rate = slow ? 0.5 : 0.85;
     const v = synth.getVoices().find((x) => x.lang && x.lang.toLowerCase().startsWith("it")); if (v) u.voice = v;
     synth.speak(u);
@@ -347,7 +353,7 @@ function renderDone(root) {
 /* ================= student screens ================= */
 function tabbar(cur) {
   const t = (h, icon, lbl, k) => `<a href="${h}" ${cur === k ? 'aria-current="page"' : ""}>${icon}${lbl}</a>`;
-  return `<nav class="tabbar" aria-label="Sezioni">${t("#/", I.tabTasks, "Compiti", "home")}${t("#/palestra", I.tabGym, "Palestra", "gym")}${t("#/io", I.tabMe, "Io", "me")}</nav>`;
+  return `<nav class="tabbar" aria-label="Sezioni">${t("#/", I.tabTasks, "Compiti", "home")}${t("#/palestra", I.tabGym, "Palestra", "gym")}${t("#/pronuncia", I.tabMic, "Pronuncia", "pron")}${t("#/io", I.tabMe, "Io", "me")}</nav>`;
 }
 
 async function viewStudentHome(root) {
@@ -416,6 +422,94 @@ function startUnit(unitId) {
   const u = UNITS.find((x) => x.id === unitId);
   const ids = shuffle(u.items).slice(0, 10).map((x) => x.id);
   startPlay({ kind: "palestra", ids, meta: { unit: u.id } });
+}
+
+/* ---------- pronuncia ---------- */
+const pronStars = () => ls.get("pron", {});
+function viewPronuncia(root) {
+  const st = pronStars();
+  root.innerHTML = `<div class="phone"><main>
+    <div><div class="hand blue">parla con me</div><h1 class="display d-l blue">Pronuncia</h1></div>
+    <p class="muted" style="margin:0">Ascolta la parola, poi registrala con la tua voce. L'app ti dice se ti ha capita bene.</p>
+    ${PRON.map((g) => { const done = g.words.filter((w) => st[w.w] >= 2).length; return `<a class="list-item big" href="#/pronuncia/${g.id}/0">
+      <div class="grow"><b class="display" style="font-size:22px;font-stretch:85%;text-transform:none">${esc(g.title)}</b><div class="small muted">${esc(g.sub)}</div></div>
+      <span class="${done === g.words.length ? "score" : "pill blue"}" ${done === g.words.length ? 'style="font-size:24px"' : ""}>${done}/${g.words.length}</span></a>`; }).join("")}
+  </main>${tabbar("pron")}</div>`;
+}
+let rec = null;
+function viewPronWord(root, gid, idx) {
+  const g = PRON.find((x) => x.id === gid); if (!g) return go("#/pronuncia");
+  idx = Math.max(0, Math.min(g.words.length - 1, idx));
+  const w = g.words[idx], star = pronStars()[w.w] || 0;
+  const long = w.w.length > 12;
+  root.innerHTML = `<div class="phone"><main style="gap:16px">
+    <div class="row"><a class="iconbtn" href="#/pronuncia" aria-label="Torna alla lista">${I.x}</a><div class="grow"><span class="eyebrow blue">${esc(g.title)}</span><div class="small muted">${idx + 1} di ${g.words.length}</div></div>
+      <span class="hand" style="color:var(--green);font-size:26px">${"★".repeat(star)}${"☆".repeat(2 - star)}</span></div>
+    <div class="bigword" style="flex-direction:column;gap:6px;padding:26px 16px">
+      <span class="display" style="font-size:${long ? 38 : 64}px;text-transform:none;font-stretch:80%;overflow-wrap:anywhere">${esc(w.w)}</span>
+      <span class="small" style="opacity:.85">ES · ${esc(w.es)}</span>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn light sm" data-act="pron-say" data-text="${esc(w.w)}">Ascolta</button><button class="btn outline-light sm" data-act="pron-slow" data-text="${esc(w.w)}">Lento</button></div>
+    </div>
+    <p class="small muted" style="margin:0">${esc(g.tip)}</p>
+    <div class="speak" style="flex-direction:column;gap:10px">
+      <button class="play" id="recBtn" data-act="pron-rec" aria-label="Registra la tua voce">${I.mic}</button>
+      <span class="small" id="recLbl" style="font-weight:700">Tocca e di' la parola</span>
+    </div>
+    <div id="pronRes"></div>
+    <div class="row" style="margin-top:auto;gap:8px">${idx > 0 ? `<a class="btn ghost grow" href="#/pronuncia/${g.id}/${idx - 1}">Indietro</a>` : ""}${idx < g.words.length - 1 ? `<a class="btn grow" href="#/pronuncia/${g.id}/${idx + 1}">Prossima</a>` : `<a class="btn grow" href="#/pronuncia">Finito</a>`}</div>
+  </main></div>`;
+  S.pron = { g, w };
+  setTimeout(() => say(w.w, 0.85), 250);
+}
+async function pronRecord() {
+  const btn = $("#recBtn"), lbl = $("#recLbl");
+  if (rec && rec.state === "recording") { rec.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { return toast("Permetti il microfono per registrare la tua voce"); }
+  const type = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg"].find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+  const chunks = [];
+  rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    clearTimeout(rec.t);
+    btn.innerHTML = I.mic; btn.style.background = ""; lbl.textContent = "Ascolto cosa hai detto…";
+    const blob = new Blob(chunks, { type: rec.mimeType || type || "audio/webm" });
+    const url = URL.createObjectURL(blob);
+    await pronCheck(blob, url);
+    lbl.textContent = "Tocca per riprovare";
+  };
+  rec.start();
+  btn.innerHTML = I.stop; btn.style.background = "var(--red)"; lbl.textContent = "Sto ascoltando… tocca per fermare";
+  rec.t = setTimeout(() => rec && rec.state === "recording" && rec.stop(), S.pron.w.w.length > 12 ? 6000 : 3500);
+}
+async function pronCheck(blob, url) {
+  const { g, w } = S.pron;
+  const box = $("#pronRes");
+  let heard = null, err = null;
+  try {
+    const r = await fetch("/api/stt", { method: "POST", headers: { "content-type": blob.type || "audio/webm" }, body: blob, credentials: "same-origin" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) err = j.error || "Non riesco ad ascoltare"; else heard = j.text;
+  } catch { err = "Connessione assente"; }
+  const listen = `<button class="btn ghost sm" data-act="pron-play" data-url="${url}">Riascoltati</button>`;
+  if (err) {
+    box.innerHTML = `<div class="card stack"><b>Riascoltati e confronta con Rossana</b><span class="small muted">${esc(err)}.</span><div class="row wrap" style="gap:8px">${listen}<button class="btn ghost sm" data-act="pron-say" data-text="${esc(w.w)}">Ascolta Rossana</button></div></div>`;
+    return;
+  }
+  const words = (x) => bare(x).split(" ").filter(Boolean);
+  const target = words(w.w), got = words(heard);
+  const hit = target.filter((t) => got.includes(t)).length;
+  const ok = hit === target.length, close = !ok && hit / target.length >= 0.5;
+  const stars = ok ? 2 : close ? 1 : 0;
+  const all = pronStars(); if (stars > (all[w.w] || 0)) { all[w.w] = stars; ls.set("pron", all); }
+  sfx(ok ? "ok" : "ko");
+  box.innerHTML = ok
+    ? `<div class="sheet ok" style="margin:0;border-radius:22px"><span class="display d-s" style="color:var(--green-dark)">Perfetto!</span><span>Ho sentito: <b>${esc(heard || w.w)}</b></span><div class="row" style="gap:8px">${listen}</div></div>`
+    : `<div class="sheet ko" style="margin:0;border-radius:22px"><span class="display d-s">${close ? "Quasi!" : "Riprova"}</span><span>Ho sentito: <b>«${esc(heard || "…")}»</b></span><p style="margin:0">${esc(w.tip)}</p>
+        <div class="row wrap" style="gap:8px"><button class="btn light sm" data-act="pron-slow" data-text="${esc(w.w)}">Ascolta lento</button><button class="btn outline-light sm" data-act="pron-play" data-url="${url}">Riascoltati</button></div></div>`;
+  api("/api/my/practice/finish", { method: "POST", body: { unit_id: "pronuncia", passed: false, duration_sec: 5, answers: [{ exercise_id: `pron-${g.id}-${bare(w.w).replace(/\W+/g, "-")}`, category: "Pronuncia", prompt: w.w, given: heard || "", expected: w.w, correct: ok }] } }).catch(() => {});
 }
 
 function viewMe(root) {
@@ -766,6 +860,8 @@ async function render() {
     }
     if (h === "#/palestra") return await viewPalestra(root);
     if (h === "#/io") return viewMe(root);
+    if (h === "#/pronuncia") return viewPronuncia(root);
+    const pm = h.match(/^#\/pronuncia\/([\w-]+)\/(\d+)$/); if (pm) return viewPronWord(root, pm[1], +pm[2]);
     return await viewStudentHome(root);
   } catch (e) {
     if (S.me) root.innerHTML = `<div class="phone"><main><div class="empty"><span class="hand">ops</span>${esc(e.message)}<br><button class="btn sm" style="margin-top:12px" data-act="reload">Riprova</button></div></main></div>`;
@@ -794,6 +890,10 @@ document.addEventListener("click", async (ev) => {
       case "say": say(EX[p.ids[p.i]].a, 0.85); break;
       case "say-slow": say(EX[p.ids[p.i]].a, 0.5); break;
       case "say-text": say(t.dataset.text, 0.85); break;
+      case "pron-say": say(t.dataset.text, 0.85); break;
+      case "pron-slow": say(t.dataset.text, 0.5); break;
+      case "pron-rec": await pronRecord(); break;
+      case "pron-play": { if (audioEl) audioEl.pause(); audioEl = new Audio(t.dataset.url); audioEl.play().catch(() => {}); break; }
       case "choose": {
         if (p.phase !== "answer") break;
         const it = EX[p.ids[p.i]]; const val = p.optOrder[+t.dataset.k];

@@ -100,7 +100,7 @@ textarea.input { border-radius: 18px; min-height: 84px; resize: vertical; font-w
 .phone { max-width: 480px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column;
   padding: 0 max(18px, env(safe-area-inset-right)) 0 max(18px, env(safe-area-inset-left)); }
 .phone main { flex-grow: 1; display: flex; flex-direction: column; gap: 18px; padding: calc(22px + env(safe-area-inset-top)) 0 24px; }
-.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--paper);
+.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--paper);
   border-top: 2px solid var(--cobalt); margin: 0 calc(-1 * max(18px, env(safe-area-inset-left))); padding: 6px 8px calc(10px + env(safe-area-inset-bottom)); z-index: 5; }
 .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 13px; font-weight: 700; padding: 6px; min-height: 48px; }
 .tabbar a[aria-current="page"] { color: var(--cobalt); }

@@ -179,17 +179,43 @@ async function api(req, env, url) {
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
     const voice = await pickVoice(env);
-    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`, {
+    const call = (settings) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`, {
       method: "POST",
       headers: { "xi-api-key": env.ELEVENLABS_API_KEY, "content-type": "application/json", accept: "audio/mpeg" },
       body: JSON.stringify({ text, model_id: env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
-        ...(/flash|turbo/.test(env.ELEVENLABS_MODEL || "") ? { language_code: "it" } : {}),
-        voice_settings: { stability: 0.6, similarity_boost: 0.8, speed: slow ? 0.75 : 0.95 } }),
+        ...(/flash|turbo/.test(env.ELEVENLABS_MODEL || "") ? { language_code: "it" } : {}), voice_settings: settings }),
     });
+    let r = await call({ stability: 0.6, similarity_boost: 0.8, speed: slow ? 0.75 : 0.95 });
+    if (!r.ok && r.status !== 401 && r.status !== 429) r = await call({ stability: 0.6, similarity_boost: 0.8 });
+    if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 700)); r = await call({ stability: 0.6, similarity_boost: 0.8, speed: slow ? 0.75 : 0.95 }); }
     if (!r.ok) { console.error("tts", r.status, await r.text()); return fail(502, "La voce non risponde"); }
     const res = new Response(r.body, { headers: { "content-type": "audio/mpeg", "cache-control": "public, max-age=31536000" } });
     await cache.put(cacheKey, res.clone());
     return res;
+  }
+
+  /* --- pronunciation check: transcribe a short recording (ElevenLabs Scribe) --- */
+  if (path === "/api/stt" && method === "POST") {
+    if (!env.ELEVENLABS_API_KEY) return fail(503, "Voce non configurata");
+    const len = Number(req.headers.get("content-length") || 0);
+    if (len > 3_000_000) return fail(413, "Registrazione troppo lunga");
+    const audio = await req.arrayBuffer();
+    if (audio.byteLength < 800) return fail(400, "Registrazione vuota");
+    const type = (req.headers.get("content-type") || "audio/webm").split(";")[0];
+    const ext = type.includes("mp4") || type.includes("aac") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
+    const fd = new FormData();
+    fd.append("file", new Blob([audio], { type }), `voce.${ext}`);
+    fd.append("model_id", env.ELEVENLABS_STT_MODEL || "scribe_v2");
+    fd.append("language_code", "it");
+    fd.append("tag_audio_events", "false");
+    const r = await fetch("https://api.elevenlabs.io/v1/speech-to-text", { method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, body: fd });
+    if (!r.ok) {
+      let detail = ""; try { const j = await r.json(); detail = (j.detail && (j.detail.status || j.detail.message)) || ""; } catch {}
+      console.error("stt", r.status, detail);
+      return fail(r.status === 401 ? 403 : 502, detail === "missing_permissions" ? "La chiave non ha il permesso Speech to Text" : "Non riesco ad ascoltare, riprova");
+    }
+    const j = await r.json();
+    return json({ text: String(j.text || "").trim() });
   }
 
   /* --- student --- */
