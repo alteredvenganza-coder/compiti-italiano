@@ -152,12 +152,13 @@ function renderItem(box, it) {
       <div class="speak"><button class="play" data-act="say" aria-label="Ascolta la parola">${I.speaker}</button><button class="btn ghost sm" data-act="say-slow">Più lento</button></div>
       <label class="field">Scrivi qui<input class="input" id="ans" style="text-align:center;font-size:24px" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></label>`;
   } else if (it.t === "choice") {
-    const opts = p.optOrder && p.optFor === it.id ? p.optOrder : (p.optOrder = shuffle([it.a, ...it.o]));
-    p.optFor = it.id;
-    const word = it.q.match(/«([^»]+)»/);
-    html += word && it.q.startsWith("Cosa vuol dire") ? `<p class="prompt" style="font-size:22px">Cosa vuol dire in spagnolo?</p><div class="bigword" style="gap:14px"><span class="display" style="font-size:${word[1].length > 12 ? 40 : 60}px">${esc(word[1])}</span>${spkBtn(word[1], true)}</div>`
+    const cv = choiceView(it);
+    const pill = (l) => `<span class="pill" style="background:var(--cream);color:var(--cobalt)">${l}</span>`;
+    html += cv.word ? `<p class="prompt" style="font-size:22px">${esc(cv.q)}</p>
+      <div class="bigword" style="flex-direction:column;gap:10px">${pill(cv.wlang)}<div class="row" style="gap:14px;justify-content:center"><span class="display" style="font-size:${cv.word.length > 12 ? 32 : cv.word.length > 8 ? 42 : 60}px;overflow-wrap:anywhere;text-align:center">${esc(cv.word)}</span>${cv.wlang === "ITALIANO" ? spkBtn(cv.word, true) : ""}</div></div>
+      <span class="eyebrow blue" style="text-align:center">Scegli in ${cv.olang === "ESPAÑOL" ? "spagnolo" : "italiano"}</span>`
       : `<div class="card"><p class="prompt" style="font-size:24px">${esc(it.q)}</p></div>`;
-    html += `<div class="opts">${opts.map((o, k) => `<button class="opt" data-act="choose" data-k="${k}">${esc(o)}</button>`).join("")}</div>`;
+    html += `<div class="opts">${cv.opts.map((o, k) => `<button class="opt" data-act="choose" data-k="${k}">${esc(o)}</button>`).join("")}</div>`;
   } else if (it.t === "match") {
     if (!p.match || p.match.id !== it.id) p.match = { id: it.id, left: shuffle(it.pairs.map((x) => x[0])), right: shuffle(it.pairs.map((x) => x[1])), done: [], sel: null, mistakes: [] };
     const M = p.match;
@@ -187,18 +188,25 @@ function tone(ctx, { f0, f1 = f0, type = "triangle", at = 0, dur = 0.18, vol = 0
   let node = o; if (cutoff) { const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = cutoff; o.connect(lp); node = lp; }
   node.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + 0.05);
 }
+function ping(ctx, f, at, dur, vol) {
+  // Glassy bell: pure sine + soft octave + a quiet inharmonic partial, quick attack, smooth decay.
+  tone(ctx, { f0: f, at, dur, vol, type: "sine" });
+  tone(ctx, { f0: f * 2, at, dur: dur * 0.6, vol: vol * 0.28, type: "sine" });
+  tone(ctx, { f0: f * 2.76, at, dur: dur * 0.35, vol: vol * 0.08, type: "sine" });
+}
 function sfx(kind) {
   if (!soundOn()) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
     if (actx.state === "suspended") actx.resume();
-    if (kind === "ok") {
-      [[1046.5, 0], [1318.5, 0.07], [1568, 0.14]].forEach(([f, at]) => { tone(actx, { f0: f, at, dur: 0.32, vol: 0.22 }); tone(actx, { f0: f * 2, at, dur: 0.12, vol: 0.05, type: "sine" }); });
-    } else if (kind === "ko") {
-      tone(actx, { f0: 196, f1: 165, type: "sawtooth", at: 0, dur: 0.16, vol: 0.18, cutoff: 900 });
-      tone(actx, { f0: 156, f1: 110, type: "sawtooth", at: 0.15, dur: 0.28, vol: 0.18, cutoff: 700 });
-    } else if (kind === "win") {
-      [[784, 0], [988, 0.09], [1175, 0.18], [1568, 0.3]].forEach(([f, at]) => tone(actx, { f0: f, at, dur: 0.4, vol: 0.2 }));
+    if (kind === "ok") {          // bright rising fifth: E6 → B6
+      ping(actx, 1318.5, 0, 0.35, 0.22); ping(actx, 1975.5, 0.075, 0.5, 0.2);
+    } else if (kind === "ko") {   // soft, friendly descending pair: D5 → A4, rounded, no buzz
+      tone(actx, { f0: 587.3, f1: 554.4, type: "sine", at: 0, dur: 0.14, vol: 0.24 });
+      tone(actx, { f0: 440, f1: 392, type: "sine", at: 0.12, dur: 0.26, vol: 0.24 });
+      tone(actx, { f0: 880, f1: 784, type: "triangle", at: 0.12, dur: 0.12, vol: 0.04 });
+    } else if (kind === "win") {  // sparkly major arpeggio: G5 B5 D6 G6
+      [[784, 0], [987.8, 0.08], [1174.7, 0.16], [1568, 0.26]].forEach(([f, at], i) => ping(actx, f, at, i === 3 ? 0.9 : 0.4, 0.17));
     }
   } catch {}
 }
@@ -227,11 +235,32 @@ async function say(text, rate) {
 const SPK = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>';
 const spkBtn = (text, light) => `<button class="iconbtn" style="${light ? "border-color:var(--cream);color:var(--cream)" : ""}" data-act="say-text" data-text="${esc(text)}" aria-label="Ascolta">${SPK}</button>`;
 
+// "Cosa vuol dire «X»?" items run both ways: Italian word → Spanish options, or Spanish word → Italian options.
+function choiceView(it) {
+  const p = S.play;
+  if (p.cv && p.cv.id === it.id) return p.cv;
+  const m = it.q.match(/«([^»]+)»/);
+  let cv;
+  if (m && it.q.startsWith("Cosa vuol dire") && !m[1].includes(" ")) {
+    const itWord = m[1], esWord = it.a.split(" / ")[0];
+    if (Math.random() < 0.5) {
+      cv = { word: itWord, wlang: "ITALIANO", olang: "ESPAÑOL", q: "Come si dice in spagnolo?", opts: shuffle([it.a, ...it.o]), correct: it.a, prompt: `${itWord} → spagnolo` };
+    } else {
+      const others = shuffle(UNITS.find((u) => u.id === "falsi").items.filter((x) => x.t === "choice" && x !== it && /^Cosa vuol dire «[^» ]+»/.test(x.q)).map((x) => x.q.match(/«([^»]+)»/)[1])).slice(0, 3);
+      cv = { word: esWord, wlang: "ESPAÑOL", olang: "ITALIANO", q: "¿Cómo se dice en italiano?", opts: shuffle([itWord, ...others]), correct: itWord, prompt: `${esWord} → italiano` };
+    }
+    cv.itWord = itWord;
+  } else cv = { word: null, opts: shuffle([it.a, ...it.o]), correct: it.a, prompt: it.q };
+  cv.id = it.id; p.cv = cv; p.optOrder = cv.opts;
+  return cv;
+}
+
 function answer(given, opts = {}) {
   const p = S.play; const it = EX[p.ids[p.i]];
   if (p.phase !== "answer") return;
   let res;
-  if (it.t === "choice") res = { ok: given === it.a };
+  const cv = it.t === "choice" ? choiceView(it) : null;
+  if (it.t === "choice") res = { ok: given === cv.correct };
   else if (it.t === "match") res = { ok: opts.mistakes <= 1 };
   else if (opts.skip) res = { ok: false };
   else {
@@ -240,9 +269,9 @@ function answer(given, opts = {}) {
   }
   p.phase = "feedback";
   p.results[p.i] = {
-    exercise_id: it.id, category: it.cat, prompt: promptText(it),
+    exercise_id: it.id, category: it.cat, prompt: cv ? cv.prompt : promptText(it),
     given: it.t === "match" ? (opts.mistakes ? `sbagli: ${opts.wrongs.join(", ")}` : "tutto giusto") : opts.skip ? "(non lo so)" : String(given),
-    expected: expectedText(it), correct: res.ok, needs_review: it.t === "tr" && !res.ok && !opts.skip,
+    expected: cv ? cv.correct : expectedText(it), correct: res.ok, needs_review: it.t === "tr" && !res.ok && !opts.skip,
   };
   persistPlay();
   sfx(res.ok ? "ok" : "ko");
@@ -250,7 +279,7 @@ function answer(given, opts = {}) {
   const sheet = $("#sheet");
   const nextLbl = p.i < p.ids.length - 1 ? "Avanti" : "Finisci";
   const x = it.x && !it.two ? `<p style="margin:0">${esc(it.x)}</p>` : "";
-  const itText = it.t === "fill" ? it.q.replace(/_{2,}/, expectedText(it)).replace(/\s*\([^)]*\)\s*$/, "") : it.t === "tr" && it.dir === "es-it" ? expectedText(it) : it.t === "listen" ? it.a : it.t === "choice" && /«([^»]+)»/.test(it.q) && it.q.startsWith("Cosa vuol dire") ? it.q.match(/«([^»]+)»/)[1] : "";
+  const itText = it.t === "fill" ? it.q.replace(/_{2,}/, expectedText(it)).replace(/\s*\([^)]*\)\s*$/, "") : it.t === "tr" && it.dir === "es-it" ? expectedText(it) : it.t === "listen" ? it.a : cv && cv.itWord ? cv.itWord : "";
   if (res.ok) {
     sheet.innerHTML = `<div class="sheet ok"><div class="spread"><span class="display d-s" style="color:var(--green-dark)">${res.accent ? "Giusto, ma…" : "Giusto!"}</span>${p.kind === "palestra" ? '<b style="color:var(--green-dark)">+10 XP</b>' : ""}</div>
       ${res.accent ? `<p style="margin:0">Attenta agli accenti: <b>${esc(expectedText(it))}</b></p>` : ""}${x}${itText && it.t !== "listen" ? `<div class="row small" style="color:var(--green-dark);font-weight:700">${spkBtn(itText)} Ascolta come si dice</div>` : ""}
@@ -258,7 +287,7 @@ function answer(given, opts = {}) {
   } else {
     sheet.innerHTML = `<div class="sheet ko"><span class="display d-s">${opts.skip ? "Ecco come si dice" : "Quasi!"}</span>
       ${!opts.skip && it.t !== "match" && it.t !== "choice" ? `<div><span class="eyebrow" style="opacity:.85">Hai scritto</span><div style="font-size:18px;text-decoration:line-through">${esc(given)}</div></div>` : ""}
-      <div class="row" style="align-items:flex-end"><div class="grow"><span class="eyebrow" style="opacity:.85">Si dice</span><div class="hand" style="font-size:32px">${esc(expectedText(it))}</div></div>${itText ? spkBtn(itText, true) : ""}</div>
+      <div class="row" style="align-items:flex-end"><div class="grow"><span class="eyebrow" style="opacity:.85">Si dice</span><div class="hand" style="font-size:32px">${esc(cv && cv.word ? `${cv.word} = ${cv.correct}` : cv ? cv.correct : expectedText(it))}</div></div>${itText ? spkBtn(itText, true) : ""}</div>
       ${x}${it.t === "tr" && !opts.skip ? '<p class="small" style="margin:0;opacity:.9">Nad controllerà la tua traduzione: magari va bene anche così.</p>' : ""}
       <button class="btn light block big" data-act="next">${nextLbl}</button></div>`;
   }
@@ -767,7 +796,7 @@ document.addEventListener("click", async (ev) => {
       case "choose": {
         if (p.phase !== "answer") break;
         const it = EX[p.ids[p.i]]; const val = p.optOrder[+t.dataset.k];
-        document.querySelectorAll(".opt").forEach((b) => { b.disabled = true; const v = p.optOrder[+b.dataset.k]; if (v === it.a) b.classList.add("ok"); else if (b === t) b.classList.add("ko"); });
+        document.querySelectorAll(".opt").forEach((b) => { b.disabled = true; const v = p.optOrder[+b.dataset.k]; if (v === p.cv.correct) b.classList.add("ok"); else if (b === t) b.classList.add("ko"); });
         answer(val); break;
       }
       case "mleft": p.match.sel = t.dataset.w; renderItem($("#ex"), EX[p.ids[p.i]]); break;
