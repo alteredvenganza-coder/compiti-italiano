@@ -155,7 +155,7 @@ function renderItem(box, it) {
     const opts = p.optOrder && p.optFor === it.id ? p.optOrder : (p.optOrder = shuffle([it.a, ...it.o]));
     p.optFor = it.id;
     const word = it.q.match(/«([^»]+)»/);
-    html += word && it.q.startsWith("Cosa vuol dire") ? `<p class="prompt" style="font-size:22px">Cosa vuol dire in spagnolo?</p><div class="bigword"><span class="display" style="font-size:${word[1].length > 12 ? 40 : 60}px">${esc(word[1])}</span></div>`
+    html += word && it.q.startsWith("Cosa vuol dire") ? `<p class="prompt" style="font-size:22px">Cosa vuol dire in spagnolo?</p><div class="bigword" style="gap:14px"><span class="display" style="font-size:${word[1].length > 12 ? 40 : 60}px">${esc(word[1])}</span>${spkBtn(word[1], true)}</div>`
       : `<div class="card"><p class="prompt" style="font-size:24px">${esc(it.q)}</p></div>`;
     html += `<div class="opts">${opts.map((o, k) => `<button class="opt" data-act="choose" data-k="${k}">${esc(o)}</button>`).join("")}</div>`;
   } else if (it.t === "match") {
@@ -177,15 +177,29 @@ function renderItem(box, it) {
   if (it.t === "listen") setTimeout(() => say(it.a, 0.85), 300);
 }
 
-function say(text, rate) {
+// Voice: ElevenLabs through our server (cached), with the phone's own voice as fallback.
+let audioEl = null;
+const voiceOk = { v: true };
+async function say(text, rate) {
+  const slow = rate < 0.7;
+  if (voiceOk.v) {
+    try {
+      if (audioEl) audioEl.pause();
+      audioEl = new Audio(`/api/tts?t=${encodeURIComponent(text)}${slow ? "&slow=1" : ""}`);
+      await audioEl.play();
+      return;
+    } catch (e) { if (String(e && e.name) !== "NotAllowedError") voiceOk.v = false; else return toast("Tocca il tasto per ascoltare"); }
+  }
   try {
     const synth = window.speechSynthesis; if (!synth) return toast("Questo telefono non legge ad alta voce");
     synth.cancel();
-    const u = new SpeechSynthesisUtterance(text); u.lang = "it-IT"; u.rate = rate;
+    const u = new SpeechSynthesisUtterance(text); u.lang = "it-IT"; u.rate = slow ? 0.5 : 0.85;
     const v = synth.getVoices().find((x) => x.lang && x.lang.toLowerCase().startsWith("it")); if (v) u.voice = v;
     synth.speak(u);
   } catch { toast("Non riesco a leggere ad alta voce"); }
 }
+const SPK = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>';
+const spkBtn = (text, light) => `<button class="iconbtn" style="${light ? "border-color:var(--cream);color:var(--cream)" : ""}" data-act="say-text" data-text="${esc(text)}" aria-label="Ascolta">${SPK}</button>`;
 
 function answer(given, opts = {}) {
   const p = S.play; const it = EX[p.ids[p.i]];
@@ -208,14 +222,15 @@ function answer(given, opts = {}) {
   const sheet = $("#sheet");
   const nextLbl = p.i < p.ids.length - 1 ? "Avanti" : "Finisci";
   const x = it.x && !it.two ? `<p style="margin:0">${esc(it.x)}</p>` : "";
+  const itText = it.t === "fill" ? it.q.replace(/_{2,}/, expectedText(it)).replace(/\s*\([^)]*\)\s*$/, "") : it.t === "tr" && it.dir === "es-it" ? expectedText(it) : it.t === "listen" ? it.a : it.t === "choice" && /«([^»]+)»/.test(it.q) && it.q.startsWith("Cosa vuol dire") ? it.q.match(/«([^»]+)»/)[1] : "";
   if (res.ok) {
     sheet.innerHTML = `<div class="sheet ok"><div class="spread"><span class="display d-s" style="color:var(--green-dark)">${res.accent ? "Giusto, ma…" : "Giusto!"}</span>${p.kind === "palestra" ? '<b style="color:var(--green-dark)">+10 XP</b>' : ""}</div>
-      ${res.accent ? `<p style="margin:0">Attenta agli accenti: <b>${esc(expectedText(it))}</b></p>` : ""}${x}
+      ${res.accent ? `<p style="margin:0">Attenta agli accenti: <b>${esc(expectedText(it))}</b></p>` : ""}${x}${itText && it.t !== "listen" ? `<div class="row small" style="color:var(--green-dark);font-weight:700">${spkBtn(itText)} Ascolta come si dice</div>` : ""}
       <button class="btn green block big" data-act="next">${nextLbl}</button></div>`;
   } else {
     sheet.innerHTML = `<div class="sheet ko"><span class="display d-s">${opts.skip ? "Ecco come si dice" : "Quasi!"}</span>
       ${!opts.skip && it.t !== "match" && it.t !== "choice" ? `<div><span class="eyebrow" style="opacity:.85">Hai scritto</span><div style="font-size:18px;text-decoration:line-through">${esc(given)}</div></div>` : ""}
-      <div><span class="eyebrow" style="opacity:.85">Si dice</span><div class="hand" style="font-size:32px">${esc(expectedText(it))}</div></div>
+      <div class="row" style="align-items:flex-end"><div class="grow"><span class="eyebrow" style="opacity:.85">Si dice</span><div class="hand" style="font-size:32px">${esc(expectedText(it))}</div></div>${itText ? spkBtn(itText, true) : ""}</div>
       ${x}${it.t === "tr" && !opts.skip ? '<p class="small" style="margin:0;opacity:.9">Nad controllerà la tua traduzione: magari va bene anche così.</p>' : ""}
       <button class="btn light block big" data-act="next">${nextLbl}</button></div>`;
   }
@@ -718,6 +733,7 @@ document.addEventListener("click", async (ev) => {
       case "skip": answer("", { skip: true }); break;
       case "say": say(EX[p.ids[p.i]].a, 0.85); break;
       case "say-slow": say(EX[p.ids[p.i]].a, 0.5); break;
+      case "say-text": say(t.dataset.text, 0.85); break;
       case "choose": {
         if (p.phase !== "answer") break;
         const it = EX[p.ids[p.i]]; const val = p.optOrder[+t.dataset.k];

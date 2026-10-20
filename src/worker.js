@@ -55,6 +55,20 @@ async function startSession(env, userId) {
   return `sid=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`;
 }
 
+/* ---------------- voice ---------------- */
+let voiceId = null;
+async function pickVoice(env) {
+  if (env.ELEVENLABS_VOICE_ID) return env.ELEVENLABS_VOICE_ID;
+  if (voiceId) return voiceId;
+  try {
+    const r = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+    const { voices = [] } = await r.json();
+    const it = voices.find((v) => (v.verified_languages || []).some((l) => l.language === "it") || /ital/i.test(JSON.stringify(v.labels || {})));
+    voiceId = (it || voices.find((v) => v.category === "premade") || voices[0])?.voice_id;
+  } catch (e) { console.error("voices", e); }
+  return voiceId || "21m00Tcm4TlvDq8ikWAM";
+}
+
 /* ---------------- stats (streak / xp) ---------------- */
 async function bumpStats(env, userId, xp, seconds) {
   const s = await env.DB.prepare("SELECT * FROM stats WHERE user_id = ?").bind(userId).first();
@@ -139,6 +153,30 @@ async function api(req, env, url) {
   if (path === "/api/me" && method === "GET") {
     const stats = await DB.prepare("SELECT xp, streak, last_day, practice_sec FROM stats WHERE user_id = ?").bind(me.id).first();
     return json({ user: { id: me.id, role: me.role, name: me.name, username: me.username, color: me.color }, stats: stats || { xp: 0, streak: 0, last_day: null, practice_sec: 0 } });
+  }
+
+  /* --- voice (ElevenLabs), any logged-in user --- */
+  if (path === "/api/tts" && method === "GET") {
+    const text = String(url.searchParams.get("t") || "").trim().slice(0, 160);
+    const slow = url.searchParams.get("slow") === "1";
+    if (!text) return fail(400, "Testo mancante");
+    if (!env.ELEVENLABS_API_KEY) return fail(503, "Voce non configurata");
+    const cacheKey = new Request(`https://tts.cache/${slow ? "s" : "n"}/${encodeURIComponent(text)}`);
+    const cache = caches.default;
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    const voice = await pickVoice(env);
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`, {
+      method: "POST",
+      headers: { "xi-api-key": env.ELEVENLABS_API_KEY, "content-type": "application/json", accept: "audio/mpeg" },
+      body: JSON.stringify({ text, model_id: env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+        ...(/flash|turbo/.test(env.ELEVENLABS_MODEL || "") ? { language_code: "it" } : {}),
+        voice_settings: { stability: 0.6, similarity_boost: 0.8, speed: slow ? 0.75 : 0.95 } }),
+    });
+    if (!r.ok) { console.error("tts", r.status, await r.text()); return fail(502, "La voce non risponde"); }
+    const res = new Response(r.body, { headers: { "content-type": "audio/mpeg", "cache-control": "public, max-age=31536000" } });
+    await cache.put(cacheKey, res.clone());
+    return res;
   }
 
   /* --- student --- */
