@@ -1,0 +1,12 @@
+-- Schema of the compiti-italiano database (already applied to the production D1 database).
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('teacher','student')), name TEXT NOT NULL, username TEXT NOT NULL UNIQUE COLLATE NOCASE, pass_hash TEXT NOT NULL, pass_salt TEXT NOT NULL, color TEXT, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')), last_login TEXT);
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, week INTEGER NOT NULL, minutes INTEGER NOT NULL, include_review INTEGER NOT NULL DEFAULT 1, due_date TEXT, note TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), status TEXT NOT NULL DEFAULT 'assegnato', started_at TEXT, completed_at TEXT, score INTEGER, total INTEGER, duration_sec INTEGER);
+CREATE TABLE IF NOT EXISTS answers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source TEXT NOT NULL CHECK (source IN ('compito','palestra')), assignment_id TEXT, exercise_id TEXT NOT NULL, category TEXT NOT NULL, prompt TEXT, given TEXT, expected TEXT, correct INTEGER NOT NULL, needs_review INTEGER NOT NULL DEFAULT 0, teacher_verdict TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS answers_user ON answers(user_id, created_at);
+CREATE INDEX IF NOT EXISTS answers_assign ON answers(assignment_id);
+CREATE TABLE IF NOT EXISTS practice (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, unit_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, unit_id));
+CREATE TABLE IF NOT EXISTS stats (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, xp INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0, last_day TEXT, practice_sec INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS lessons (id TEXT PRIMARY KEY, date TEXT NOT NULL, week INTEGER NOT NULL, duration INTEGER, did TEXT, note_a TEXT, note_b TEXT, homework TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS teacher_errors (id TEXT PRIMARY KEY, student_id TEXT, category TEXT NOT NULL, wrong TEXT NOT NULL, right_form TEXT NOT NULL, note TEXT, solved INTEGER NOT NULL DEFAULT 0, date TEXT NOT NULL DEFAULT (date('now')));
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
