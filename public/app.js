@@ -900,7 +900,7 @@ document.addEventListener("click", async (ev) => {
         document.querySelectorAll(".opt").forEach((b) => { b.disabled = true; const v = p.optOrder[+b.dataset.k]; if (v === p.cv.correct) b.classList.add("ok"); else if (b === t) b.classList.add("ko"); });
         answer(val); break;
       }
-      case "mleft": p.match.sel = t.dataset.w; renderItem($("#ex"), EX[p.ids[p.i]]); break;
+      case "mleft": p.match.sel = t.dataset.w; say(t.dataset.w); renderItem($("#ex"), EX[p.ids[p.i]]); break;
       case "mright": {
         const M = p.match, it = EX[p.ids[p.i]];
         if (!M.sel) { toast("Prima scegli una parola italiana"); break; }
